@@ -31,7 +31,7 @@ export function clearPlanIdempotencyKey(details) {
 }
 
 async function waitForJob(jobId) {
-    for (let attempt = 0; attempt < 90; attempt += 1) {
+    for (let attempt = 0; attempt < 150; attempt += 1) {
         const response = await api.get(`/api/jobs/${jobId}`)
         const data = response.data
         if (data.status === "succeeded" && data.interviewReport) {

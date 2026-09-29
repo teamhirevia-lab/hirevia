@@ -37,12 +37,11 @@ const ai = new GoogleGenAI({
 })
 
 // Google retired the 2.x models for new API keys. Fall back when a model is missing or busy.
-const GEMINI_MODELS = [
-    "gemini-3.5-flash-lite",
-    "gemini-3.8-flash",
-]
+const GEMINI_PRIMARY = "gemini-3.8-flash"
+const GEMINI_FAST = "gemini-3.5-flash-lite"
+const GEMINI_MODELS = [GEMINI_PRIMARY, GEMINI_FAST]
 
-const GEMINI_TIMEOUT_MS = 45_000
+const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS) || 120_000
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms))
@@ -124,10 +123,10 @@ async function generateContentWithRetry(params, {
                     status: "error",
                     errorClass,
                 })
-                if (errorClass === "billing" || errorClass === "rate_limited" || errorClass === "timeout") {
+                if (errorClass === "billing" || errorClass === "rate_limited") {
                     throw err
                 }
-                if (errorClass === "not_found") {
+                if (errorClass === "timeout" || errorClass === "not_found") {
                     break
                 }
                 if (errorClass === "unavailable" && attempt < maxAttemptsPerModel) {
@@ -142,11 +141,11 @@ async function generateContentWithRetry(params, {
     throw lastError
 }
 
-async function generateStructuredJson(params, { route, fallbackModel = "gemini-3.8-flash" } = {}) {
+async function generateStructuredJson(params, { route, fallbackModel = GEMINI_FAST } = {}) {
     try {
         const response = await generateContentWithRetry(params, {
-            models: [GEMINI_MODELS[0]],
-            maxAttemptsPerModel: 2,
+            models: GEMINI_MODELS,
+            maxAttemptsPerModel: 1,
             route,
         })
         return parseGeminiJson(response.text)
@@ -1659,7 +1658,7 @@ If you follow up, the question must reference something the candidate actually s
             },
         },
     }, {
-        models: [GEMINI_MODELS[0]],
+        models: [GEMINI_FAST],
         maxAttemptsPerModel: 1,
         timeoutMs: 20_000,
         route: "generateFollowUpQuestion",
