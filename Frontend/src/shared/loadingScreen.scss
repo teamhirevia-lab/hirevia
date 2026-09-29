@@ -1,0 +1,60 @@
+.app-loading {
+    min-height: 100dvh;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 2rem 1.25rem;
+    text-align: center;
+    background: var(--canvas);
+    color: var(--ink);
+
+    &--compact {
+        min-height: 320px;
+        background: transparent;
+    }
+
+    &__mark {
+        font-weight: 700;
+        letter-spacing: -0.04em;
+        font-size: 0.95rem;
+    }
+
+    &__orbit {
+        width: 28px;
+        height: 28px;
+        border: 2px solid var(--line);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: app-spin 700ms linear infinite;
+    }
+
+    h1 {
+        margin: 0;
+        font-size: 1.2rem;
+        letter-spacing: -0.03em;
+    }
+
+    p {
+        margin: 0;
+        max-width: 36ch;
+        color: var(--ink-muted);
+        line-height: 1.55;
+        font-size: 0.92rem;
+    }
+}
+
+@keyframes app-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-loading__orbit {
+        animation: none;
+        border-color: var(--accent);
+    }
+}

@@ -1,0 +1,31 @@
+:root {
+    --canvas: #fcf9f6;
+    --canvas-deep: #1c1c1a;
+    --surface: #ffffff;
+    --surface-low: #f6f3f1;
+    --surface-mid: #f0edeb;
+    --ink: #1c1c1a;
+    --ink-muted: #5c5854;
+    --line: rgba(28, 28, 26, 0.12);
+    --accent: #e1034d;
+    --accent-hover: #c10242;
+    --accent-soft: rgba(225, 3, 77, 0.12);
+    --accent-ink: #ffffff;
+    --warn: #8a5a00;
+    --danger: #9a1b1b;
+    --ok: #1b7a3a;
+    --shadow: 0 8px 28px rgba(17, 17, 16, 0.08);
+    --radius-sm: 0.25rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 0.75rem;
+    --radius-pill: 0.5rem;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-move: cubic-bezier(0.77, 0, 0.175, 1);
+    --font: "Outfit Variable", "Outfit", "Segoe UI", sans-serif;
+    --font-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+    --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", monospace;
+    --z-nav: 40;
+    --z-overlay: 50;
+    --z-grain: 60;
+    --max: 1180px;
+}

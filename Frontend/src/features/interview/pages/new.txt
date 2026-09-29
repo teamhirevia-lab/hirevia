@@ -1,0 +1,285 @@
+import React from 'react'
+import { useState, useEffect } from 'react'
+import { useInterview } from '../hooks/useInterview.js'
+import { useTextToSpeech } from '../hooks/textToSpeech.js'
+import { useSpeechRecognition } from '../hooks/useSpeechRecognition.js'
+
+const QuestionCard = ({ item, index }) => {
+    const [open, setOpen] = useState(false)
+    return (
+        <div className='q-card'>
+            <div className='q-card__header' onClick={() => setOpen(o => !o)}>
+                <span className='q-card__index'>Q{index + 1}</span>
+                <p className='q-card__question'>{item.question}</p>
+                <span className={`q-card__chevron ${open ? 'q-card__chevron--open' : ''}`}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+                </span>
+            </div>
+            {open && (
+                <div className='q-card__body'>
+                    <div className='q-card__section'>
+                        <span className='q-card__tag q-card__tag--intention'>Intention</span>
+                        <p>{item.intention}</p>
+                    </div>
+                    <div className='q-card__section'>
+                        <span className='q-card__tag q-card__tag--answer'>Model Answer</span>
+                        <p>{item.answer}</p>
+                    </div>
+                </div>
+            )}
+        </div>
+    )
+}
+
+const MockInterview = () => {
+
+    const [section, setSection] = useState(null)
+    const [startedSection, setStartedSection] = useState(null)
+
+    const { speak, stopSpeaking } = useTextToSpeech()
+    const { transcript, isListening, startListening, stopListening, resetTranscript } = useSpeechRecognition()
+
+    const [questionIndex, setQuestionIndex] = useState(0)
+    const [answers, setAnswers] = useState([])
+
+    const { report } = useInterview()
+    const answerKey = `${section}_${questionIndex}`
+
+    const currentAnswer =
+        answers.find(
+            answer =>
+
+                answer.section === section
+
+                &&
+
+                answer.questionIndex
+                === questionIndex
+        )?.userAnswer
+
+    if (!report) {
+        return (
+            <main className='loading-screen'>
+                <h1>
+                    Preparing Mock Interview...
+                </h1>
+            </main>
+        )
+    }
+
+    const handleSectionSelect =
+        (selectedSection) => {
+
+            setSection(selectedSection)
+
+            setStartedSection(
+                selectedSection
+            )
+
+            setQuestionIndex(0)
+        }
+
+    const handleNextQuestion = () => {
+
+        const questions =
+            section === 'technical'
+                ? report?.technicalQuestions
+                : report?.behavioralQuestions
+
+        const finalAnswer = currentAnswer || transcript
+
+        if (!finalAnswer?.trim()) {
+            alert("Please answer this question before moving to next question!")
+            return
+        }
+
+        const answerObject = {
+
+            section,
+
+            questionIndex,
+
+            question:
+                questions[questionIndex]
+                    .question,
+
+            expectedAnswer:
+                questions[questionIndex]
+                    .answer,
+
+            userAnswer:
+                finalAnswer
+        }
+
+        setAnswers(prev => {
+
+            const filteredAnswers =
+                prev.filter(
+                    answer =>
+
+                        !(
+                            answer.section
+                            === section
+
+                            &&
+
+                            answer.questionIndex
+                            === questionIndex
+                        )
+                )
+
+            return [
+
+                ...filteredAnswers,
+
+                answerObject
+            ]
+        })
+
+        if (questionIndex < questions.length - 1) {
+
+            resetTranscript()
+            setQuestionIndex(prev => prev + 1)
+
+        } else {
+
+            if (
+                section === startedSection
+            ) {
+
+                const nextSection =
+                    section === 'technical'
+                        ? 'behavioral'
+                        : 'technical'
+
+                setSection(nextSection)
+
+                setQuestionIndex(0)
+
+                resetTranscript()
+
+            } else {
+
+                alert("Mock Interview is Over!")
+            }
+        }
+    }
+
+
+    useEffect(() => {
+
+        if (section !== null) {
+            const questions =
+                section === 'technical'
+                    ? report?.technicalQuestions
+                    : report?.behavioralQuestions
+
+
+            const currentQuestion =
+                questions?.[questionIndex]
+
+            if (currentQuestion) {
+
+                speak(currentQuestion.question)
+            }
+        }
+
+    }, [questionIndex, section])
+
+    if (section == null) {
+        return (
+            <main className='choose-section'>
+                <button onClick={() => handleSectionSelect('technical')}>Technical Questions</button>
+                <button onClick={() => handleSectionSelect('behavioral')}>Behavioral Questions</button>
+            </main>
+        )
+    }
+
+    return (
+        <div>
+            {section === 'technical' && (
+                <section>
+                    <QuestionCard key={questionIndex} item={report.technicalQuestions[questionIndex]} index={questionIndex} />
+                    <button
+                        onClick={startListening}
+                    >
+                        Start Answering
+                    </button>
+
+                    <button
+                        onClick={() => {
+
+                            stopListening()
+
+                            setAnswers(prev => ({
+
+                                ...prev,
+
+                                [answerKey]: transcript
+
+                            }))
+                        }}
+                    >
+                        Stop Answering
+                    </button>
+                    <button onClick={handleNextQuestion} disabled={!currentAnswer}>Next</button>
+                    <div>
+
+                        <h3>Your Answer</h3>
+
+                        <p>
+                            {
+                                currentAnswer
+                                ?? transcript
+                                ?? ""
+                            }
+                        </p>
+
+                    </div>
+                </section>
+            )}
+            {section === 'behavioral' && (
+                <section>
+                    <QuestionCard key={questionIndex} item={report.behavioralQuestions[questionIndex]} index={questionIndex} />
+                    <button
+                        onClick={startListening}
+                    >
+                        Start Answering
+                    </button>
+
+                    <button
+                        onClick={() => {
+
+                            stopListening()
+
+                            setAnswers(prev => ({
+
+                                ...prev,
+
+                                [answerKey]: transcript
+
+                            }))
+                        }}
+                    >
+                        Stop Answering
+                    </button>
+                    <button onClick={handleNextQuestion} disabled={!currentAnswer}>Next</button>
+                    <div>
+
+                        <h3>Your Answer</h3>
+
+                        <p>
+                            {
+                                answers[answerKey]
+                                || transcript
+                            }
+                        </p>
+
+                    </div>
+                </section>
+            )}
+        </div>
+    )
+}
+
+export default MockInterview

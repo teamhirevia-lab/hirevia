@@ -1,0 +1,53 @@
+.account-form {
+    width: min(100%, 32rem);
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md, 0.5rem);
+
+    h1 {
+        margin: 0;
+        font-size: clamp(1.8rem, 3vw, 2.4rem);
+    }
+
+    p {
+        margin: 0 0 0.6rem;
+        color: var(--ink-muted);
+    }
+
+    label {
+        margin-top: 0.35rem;
+        font-size: 0.75rem;
+        font-weight: 650;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--ink-muted);
+    }
+
+    input,
+    textarea {
+        width: 100%;
+        border: 0;
+        background: var(--surface-low, #f6f3f1);
+        color: var(--ink);
+        border-radius: 0.25rem;
+        padding: 0.7rem 0.8rem;
+        font: inherit;
+    }
+
+    button {
+        margin-top: 0.7rem;
+        align-self: flex-start;
+    }
+}
+
+.account-form__error {
+    color: var(--danger);
+}
+
+.account-form__note {
+    color: var(--ok);
+}
