@@ -1202,6 +1202,29 @@ async function generateMockInterviewReport({
         return Math.max(0, Math.min(10, Number((raw * 10).toFixed(1))))
     }
 
+    const compactMetrics = (metrics) => {
+        if (!metrics || typeof metrics !== "object") return null
+        return {
+            cameraEngagement: metrics.cameraEngagement,
+            eyeContact: metrics.eyeContact,
+            gazeAwayRate: metrics.gazeAwayRate,
+            blinkRate: metrics.blinkRate,
+            faceVisibility: metrics.faceVisibility,
+            headMovement: metrics.headMovement,
+            posture: metrics.posture,
+            excessiveMovement: metrics.excessiveMovement,
+        }
+    }
+
+    const scoringAnswers = (answers || []).map((answer) => ({
+        questionIndex: answer.questionIndex,
+        section: answer.section,
+        question: answer.question,
+        expectedAnswer: answer.expectedAnswer,
+        userAnswer: answer.userAnswer,
+        videoMetrics: compactMetrics(answer.videoMetrics),
+    }))
+
     const prompt = `
 
 You are an expert technical interviewer.
@@ -1234,7 +1257,7 @@ Also provide:
 - overallFeedback summarizing the interview (including presentation themes if metrics exist)
 
 Candidate Answers:
-${JSON.stringify(answers, null, 2)}
+${JSON.stringify(scoringAnswers)}
 
 `
 
@@ -1460,6 +1483,14 @@ async function generateFreshMockQuestions({
     const structured = companyResearch?.structured
         || compactResearch(companyResearch?.brief || "", companyResearch?.sources)
     const researchBlock = researchPromptBlock(structured)
+    const compact = buildCompactContext({
+        role: jobProfile,
+        experience: `${yearsOfExperience} (${band})`,
+        resume,
+        selfDescription,
+        jobDescription,
+        companyResearch,
+    })
     const existingTechnicalText = (existingTechnical || []).map((question) => question.question).join("\n- ")
     const existingBehavioralText = (existingBehavioral || []).map((question) => question.question).join("\n- ")
 
@@ -1475,27 +1506,21 @@ Existing technical questions to AVOID:
 Existing behavioral questions to AVOID:
 - ${existingBehavioralText || "None"}
 
-Candidate resume:
-${resume || "Not provided"}
-
-Self description:
-${selfDescription || "Not provided"}
-
-Job description:
-${jobDescription}
+Compact candidate context:
+${compactContextJson(compact)}
 
 Skill gaps to optionally probe:
 ${gapText || "None listed"}
 
-Company hiring research (follow this for question types):
+Company hiring signals:
 ${researchBlock}
 
 Rules:
 - Create exactly 5 technical and exactly 4 behavioral questions.
 - Match this company's real mix: include system design / HLD only if research says this company asks it at this level. Skip it otherwise.
-- Include at least one HR question and one question about a co-curricular or project from the resume/self description when those exist.
+- Include at least one HR question and one question about a co-curricular or project from the compact context when those exist.
 - Questions must be new angles, deeper scenarios, or different skills than the avoided list.
-- Questions should fit this company, role, job description, and research. They do not have to name a tool from the resume.
+- Questions should fit this company, role, and context. They do not have to name a tool from the resume.
 - expectedAnswer should be a concise model answer the interviewer can score against.
 - Use STAR-friendly prompts for behavioral.
 `
@@ -1584,7 +1609,7 @@ What a strong answer covers: ${expectedAnswer || "Not specified"}
 Candidate answer: ${userAnswer}
 
 Recent answers (context only):
-${JSON.stringify((previousAnswers || []).slice(-3).map((a) => ({
+${JSON.stringify((previousAnswers || []).slice(-2).map((a) => ({
         question: a.question,
         userAnswer: a.userAnswer,
     })), null, 2)}

@@ -4,6 +4,7 @@ import { useTextToSpeech } from '../hooks/textToSpeech.js'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition.js'
 import { useCamera } from '../hooks/useCamera.js'
 import { useVideoAnalyzer } from '../hooks/useVideoAnalyzer.js'
+import { buildInterviewVocabulary } from '../config/sttConfig.js'
 import '../styles/mockInterview.scss'
 import { useMockInterview } from '../hooks/useMockInterview.js'
 import { useNavigate, useParams, Link } from 'react-router'
@@ -24,9 +25,11 @@ const MockInterview = () => {
   const [answers, setAnswers] = useState([])
   const [error, setError] = useState("")
   const [draftAnswer, setDraftAnswer] = useState("")
+  const [userEdited, setUserEdited] = useState(false)
 
   const pendingVideoMetricsRef = useRef(null)
   const answerStartedAtRef = useRef(null)
+  const userEditedRef = useRef(false)
 
   const { speak, stopSpeaking } = useTextToSpeech()
   const { report } = useInterview()
@@ -36,7 +39,19 @@ const MockInterview = () => {
   const { interviewId, mockId } = useParams()
   const navigate = useNavigate()
 
-  const { transcript, isListening, speechError, startListening, stopListening, resetTranscript } = useSpeechRecognition()
+  const {
+    transcript,
+    isListening,
+    speechError,
+    ready: whisperReady,
+    processing: transcribing,
+    sttMode,
+    startListening,
+    stopListening,
+    resetTranscript,
+    retryTranscription,
+    setVocabulary,
+  } = useSpeechRecognition()
   const { loading: mockLoading, mockReport, startMock, completeMockInterview, submitAnswer, updatingMockInterview } = useMockInterview()
   const [isFinishing, setIsFinishing] = useState(false)
   const [isPausing, setIsPausing] = useState(false)
@@ -103,8 +118,10 @@ const MockInterview = () => {
     answerStartedAtRef.current = Date.now()
     stopSpeaking()
     resetTranscript()
+    userEditedRef.current = false
+    setUserEdited(false)
     setDraftAnswer("")
-    startListening()
+    await startListening()
     await startAnalysis(videoRef.current)
   }
 
@@ -172,7 +189,16 @@ const MockInterview = () => {
   }
 
   useEffect(() => {
-    if (!transcript) return
+    setVocabulary(buildInterviewVocabulary({
+      company: report?.company,
+      role: report?.jobProfile,
+      report,
+      mockReport,
+    }))
+  }, [report, mockReport, setVocabulary])
+
+  useEffect(() => {
+    if (!transcript || userEditedRef.current) return
     setDraftAnswer(transcript)
   }, [transcript])
 
@@ -184,8 +210,11 @@ const MockInterview = () => {
       return
     }
 
-    if (isListening || isAnalyzing) {
-      handleStopAnswering()
+    if (isListening || transcribing) {
+      setError(transcribing
+        ? "Wait for transcription to finish, or type your answer."
+        : "Stop recording before continuing.")
+      return
     }
 
     setError("")
@@ -217,6 +246,8 @@ const MockInterview = () => {
       setCompletedSections(nextCompleted)
       resetTranscript()
       setDraftAnswer("")
+      userEditedRef.current = false
+      setUserEdited(false)
 
       const next = response.next
       const nextPrompt = typeof next?.question === "string"
@@ -472,9 +503,9 @@ const MockInterview = () => {
               <button
                 className='button primary-button'
                 onClick={handleStartAnswering}
-                disabled={!currentQuestion || isListening || isAnalyzing || isSubmitting}
+                disabled={!currentQuestion || isListening || isAnalyzing || isSubmitting || transcribing}
               >
-                {isListening ? "Listening..." : "Start answering"}
+                {isListening ? "Listening..." : transcribing ? "Processing your answer..." : "Start answering"}
               </button>
 
               <button
@@ -489,24 +520,50 @@ const MockInterview = () => {
             <button
               className='button primary-button'
               onClick={handleNextQuestion}
-              disabled={isSubmitting || !draftAnswer.trim()}
+              disabled={isSubmitting || !draftAnswer.trim() || (transcribing && !userEdited)}
             >
               {isSubmitting ? "Saving..." : "Next"}
             </button>
           </div>
 
           {error && <p className='form-error' role='alert'>{error}</p>}
-          {speechError && <p className='form-error' role='alert'>{speechError}</p>}
+          {speechError && (
+            <div>
+              <p className='form-error' role='alert'>{speechError}</p>
+              {sttMode !== "webkit" && (
+                <div className="answering-buttons">
+                  <button
+                    type="button"
+                    className="button secondary-button"
+                    onClick={() => retryTranscription()}
+                    disabled={transcribing || isListening}
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <p className='q-card__intention'>
-            Voice works best in Chrome. You can type instead. Speech stays in the browser APIs; video is scored on this device and is not uploaded.
+            {whisperReady && sttMode === "whisper" && "Voice transcription ready. Audio stays in this browser."}
+            {sttMode === "webkit" && "Using browser speech recognition. Please review the transcript before continuing."}
+            {sttMode === "manual" && "Type your answer. Voice transcription is unavailable on this device."}
+            {!whisperReady && sttMode === "whisper" && "Preparing voice transcription in the background..."}
           </p>
+          {transcribing && (
+            <p className='q-card__intention' role="status">Processing your answer...</p>
+          )}
 
           <div className='answer-preview'>
-            <h3>Your answer {isListening ? <span className='answer-preview__live'>Live</span> : null}</h3>
+            <h3>Your answer {isListening ? <span className='answer-preview__live'>Live</span> : transcribing ? <span className='answer-preview__live'>Processing</span> : null}</h3>
             <textarea
               className='answer-preview__input'
               value={draftAnswer}
-              onChange={(e) => setDraftAnswer(e.target.value)}
+              onChange={(e) => {
+                userEditedRef.current = true
+                setUserEdited(true)
+                setDraftAnswer(e.target.value)
+              }}
               placeholder="Click Start answering and speak, or type here."
               rows={6}
               disabled={isSubmitting}
