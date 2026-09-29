@@ -34,6 +34,7 @@ test("golang and written-in-Go phrases match Go", () => {
     assert.equal(canonicalTechName("postgres"), "PostgreSQL")
     assert.equal(canonicalTechName("postgresql"), "PostgreSQL")
     assert.equal(canonicalTechName("node.js"), "Node.js")
+    assert.equal(canonicalTechName("aws"), "AWS")
 })
 
 test("node, sql, and postgres matching stays precise", () => {
@@ -127,4 +128,58 @@ test("research signals past the opening are kept", () => {
     assert.deepEqual(fromSections.questionPatterns, ["API design and incident response"])
     assert.equal(fromSections.systemDesign, false)
     assert.deepEqual(fromSections.technicalFocus, ["SQL and stakeholder stories"])
+})
+
+const { buildCompactContext, normalizeCompanyKey } = require("./compactContext")
+const { buildCoreRoadmap } = require("./interviewIntake")
+
+test("company research keys collapse punctuation and case", () => {
+    assert.equal(normalizeCompanyKey("Google"), "google")
+    assert.equal(normalizeCompanyKey("  Google  "), "google")
+    assert.equal(normalizeCompanyKey("Google, Inc."), "google inc")
+})
+
+test("compact context extracts skills and projects without a Gemini call", () => {
+    const context = buildCompactContext({
+        role: "Backend Developer",
+        experience: "2 years",
+        resume: "Built an order API in Node.js with PostgreSQL.\nLed Redis caching for sessions.",
+        selfDescription: "I use Express and Docker.",
+        jobDescription: "Need Node.js, AWS, PostgreSQL, and Kafka.",
+        companyResearch: {
+            structured: {
+                technicalFocus: ["distributed systems"],
+                questionPatterns: ["API design"],
+                companyTechnologies: [],
+                hiringSignals: [],
+                interviewRounds: ["screen", "onsite"],
+                systemDesign: true,
+            },
+        },
+    })
+    assert.equal(context.role, "Backend Developer")
+    assert.ok(context.skills.includes("Node.js"))
+    assert.ok(context.skills.includes("PostgreSQL"))
+    assert.ok(context.jdSkills.includes("AWS"))
+    assert.ok(context.jdSkills.includes("PostgreSQL"))
+    assert.ok(context.jdSkills.includes("Node.js"))
+    assert.equal(context.systemDesign, true)
+    assert.ok(context.projects.length >= 1)
+})
+
+test("core roadmap is seven themed days filled from questions and gaps", () => {
+    const days = buildCoreRoadmap({
+        targetDays: 7,
+        company: "Google",
+        jobProfile: "Backend Developer",
+        skillGaps: [{ skill: "Kafka" }],
+        technicalQuestions: [{ question: "How would you design a Redis cache for sessions?" }],
+        behavioralQuestions: [{ question: "Tell me about a production incident you owned." }],
+        compactContext: { projects: ["Order API in Node.js"], jdSkills: ["Node.js"] },
+    })
+    assert.equal(days.length, 7)
+    assert.equal(days[0].focus, "Technical fundamentals")
+    assert.equal(days[6].focus, "Mock interview")
+    assert.ok(days[0].tasks.length >= 2)
+    assert.ok(days[0].resources.length >= 1)
 })

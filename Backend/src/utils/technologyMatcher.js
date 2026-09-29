@@ -137,6 +137,9 @@ function canonicalTechName(tech) {
     if (clean === "k8s") return "Kubernetes"
     if (clean === "javascript") return "JavaScript"
     if (clean === "typescript") return "TypeScript"
+    if (clean === "aws") return "AWS"
+    if (clean === "gcp") return "GCP"
+    if (clean === "sql") return "SQL"
     return clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : ""
 }
 

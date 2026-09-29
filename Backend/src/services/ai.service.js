@@ -5,11 +5,13 @@ const {
     experienceBand,
     resolveInterviewWindow,
     withSkillGapResources,
+    buildCoreRoadmap,
     expandRoadmap,
 } = require("../utils/interviewIntake")
 const { redactSecrets } = require("../utils/redact")
 const { logGemini, logPuppeteer, logResources, classifyGeminiError } = require("../utils/observability")
 const { getCachedResumeHtml, cacheResumeHtml } = require("./cache.service")
+const companyResearchRepository = require("../repositories/companyResearch.repository")
 const {
     KNOWN_TECH_LEXICON,
     skillAppearsInText,
@@ -25,6 +27,11 @@ const {
     researchCorpusText,
     researchPromptBlock,
 } = require("../utils/researchBrief")
+const {
+    buildCompactContext,
+    compactContextJson,
+    groundingCorpus,
+} = require("../utils/compactContext")
 
 const PLAN_TECH = { min: 8, max: 14 }
 const PLAN_BEHAVIOR = { min: 6, max: 10 }
@@ -36,12 +43,18 @@ const ai = new GoogleGenAI({
     apiKey: process.env.GOOGLE_GENAI_API_KEY
 })
 
-// Google retired the 2.x models for new API keys. Fall back when a model is missing or busy.
-const GEMINI_PRIMARY = "gemini-3.8-flash"
-const GEMINI_FAST = "gemini-3.5-flash-lite"
-const GEMINI_MODELS = [GEMINI_PRIMARY, GEMINI_FAST]
+const GEMINI_REPORT_MODELS = [
+    "gemini-2.5-flash-lite",
+    "gemini-3.5-flash-lite",
+]
+const GEMINI_RESEARCH_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+]
+const GEMINI_FAST = GEMINI_REPORT_MODELS[0]
+const GEMINI_MODELS = GEMINI_REPORT_MODELS
 
-const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS) || 120_000
+const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS) || 45_000
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms))
@@ -141,10 +154,10 @@ async function generateContentWithRetry(params, {
     throw lastError
 }
 
-async function generateStructuredJson(params, { route, fallbackModel = GEMINI_FAST } = {}) {
+async function generateStructuredJson(params, { route, fallbackModel = GEMINI_REPORT_MODELS[1] } = {}) {
     try {
         const response = await generateContentWithRetry(params, {
-            models: GEMINI_MODELS,
+            models: GEMINI_REPORT_MODELS,
             maxAttemptsPerModel: 1,
             route,
         })
@@ -278,13 +291,10 @@ async function generatePlanQuestionFill({
     behaviorMissing,
     acceptedTechnical,
     acceptedBehavioral,
-    resume,
-    selfDescription,
-    jobDescription,
+    compactContext,
     company,
     jobProfile,
     band,
-    researchBlock,
 }) {
     const avoidTechnical = (acceptedTechnical || []).map((question) => question.question).join("\n- ")
     const avoidBehavioral = (acceptedBehavioral || []).map((question) => question.question).join("\n- ")
@@ -298,21 +308,13 @@ Technical:
 Behavioral:
 - ${avoidBehavioral || "None"}
 
-Resume:
-${resume || "Not provided"}
-
-Self description:
-${selfDescription || "Not provided"}
-
-Job description:
-${jobDescription}
-
-Company research:
-${researchBlock}
+Compact candidate context (use this instead of a full resume/JD):
+${compactContextJson(compactContext)}
 
 Each question needs question, intention, answer, sourceGrounding, groundedSkills, and mentionedTechnologies.
-Technical questions may use the resume, job description, or company research. Do not invent tools that appear in none of those.
-Behavioral answers use the STAR method. Technical answers stay under 180 words. Behavioral answers stay under 120 words.
+Technical answers: 50–80 words of key points, not an essay.
+Behavioral answers: 60–100 words STAR key points.
+Do not invent tools that appear in none of the context skills, JD skills, projects, or companyFocus.
 `
 
     return generateStructuredJson({
@@ -386,31 +388,48 @@ expectedAnswer is a concise model answer. Behavioral prompts should be answerabl
     }, { route: "generateMockQuestionFill" })
 }
 
-async function researchCompanyHiring({ company, jobProfile, yearsOfExperience, jobDescription }) {
+function fallbackCompanyResearch({ company, jobProfile, band }) {
+    return {
+        available: false,
+        company,
+        jobProfile,
+        experienceBand: band,
+        brief: `Web research was unavailable. Infer the hiring process from company="${company}", role="${jobProfile}", experience="${band}".`,
+        structured: emptyStructured(),
+        sources: [],
+        note: "web research unavailable",
+    }
+}
+
+function researchFromPayload(payload, { company, jobProfile, band }) {
+    if (!payload) return fallbackCompanyResearch({ company, jobProfile, band })
+    return {
+        available: Boolean(payload.available),
+        company: payload.company || company,
+        jobProfile,
+        experienceBand: band,
+        brief: payload.brief || "",
+        structured: payload.structured || emptyStructured(),
+        sources: payload.sources || [],
+        note: payload.note || "",
+    }
+}
+
+async function fetchCompanyHiringResearch({ company, jobProfile, yearsOfExperience }) {
     const band = experienceBand(yearsOfExperience)
     const prompt = `
 You are an interview-intelligence researcher. Use Google Search to research how ${company} hires for "${jobProfile}" at the ${band} level.
 
-Job description (for context):
-${jobDescription || "Not provided"}
-
 Search recent (last 1-3 years when possible) interview experiences, hiring process writeups, and candidate reports for this company + role + experience band.
 
-Write a factual research brief with these sections:
+Write a short factual research brief with these sections:
 1. HIRING_PROCESS — typical rounds in order
 2. COMMON_ROUNDS — OA, DSA, LLD, HLD/system design, case, domain, HR, etc.
 3. QUESTION_PATTERNS — what they actually ask at this experience level
-4. INCLUDE_SYSTEM_DESIGN — yes or no, and why (example: Google L4 often includes HLD; many consulting/analyst roles do not)
-5. EXPERIENCE_FIT — how ${band} changes difficulty and topics
-6. RECENT_CANDIDATE_NOTES — short bullets from public writeups
-7. PREP_FOCUS — what to prioritize given this company
+4. INCLUDE_SYSTEM_DESIGN — yes or no, and why
+5. PREP_FOCUS — what to prioritize given this company
 
-Rules:
-- Prefer recent public interview experiences over generic advice.
-- If evidence is thin, say so and infer cautiously from similar roles at the same company.
-- Do not invent specific candidate names or fake quotes.
-
-End your reply with a single JSON object and no other text after it:
+Keep the prose under 400 words. End with a single JSON object and no other text after it:
 {
   "interviewRounds": [],
   "questionPatterns": [],
@@ -431,7 +450,7 @@ Use short strings. Set systemDesign to true only when this company asks system d
                 tools: [{ googleSearch: {} }],
             },
         }, {
-            models: ["gemini-3.8-flash", "gemini-3.5-flash"],
+            models: GEMINI_RESEARCH_MODELS,
             maxAttemptsPerModel: 1,
             route: "researchCompanyHiring",
         })
@@ -459,17 +478,38 @@ Use short strings. Set systemDesign to true only when this company asks system d
             "Company hiring research failed:",
             err?.status || err?.code || err?.name || redactSecrets(err?.message)
         )
-        return {
-            available: false,
-            company,
-            jobProfile,
-            experienceBand: band,
-            brief: `Web research was unavailable. Infer the hiring process from company="${company}", role="${jobProfile}", experience="${band}", and the job description.`,
-            structured: emptyStructured(),
-            sources: [],
-            note: "web research unavailable",
-        }
+        return fallbackCompanyResearch({ company, jobProfile, band })
     }
+}
+
+async function researchCompanyHiring({ company, jobProfile, yearsOfExperience }) {
+    const band = experienceBand(yearsOfExperience)
+    const companyKey = companyResearchRepository.normalizeCompanyKey(company)
+    if (!companyKey) {
+        return fallbackCompanyResearch({ company, jobProfile, band })
+    }
+
+    const cached = await companyResearchRepository.findFresh(companyKey)
+    if (cached?.payload) {
+        return researchFromPayload(cached.payload, { company: cached.companyLabel || company, jobProfile, band })
+    }
+
+    const fresh = await fetchCompanyHiringResearch({ company, jobProfile, yearsOfExperience })
+    if (fresh.available) {
+        await companyResearchRepository.upsert({
+            companyKey,
+            companyLabel: company,
+            payload: {
+                available: true,
+                company,
+                brief: fresh.brief,
+                structured: fresh.structured,
+                sources: fresh.sources,
+                note: fresh.note,
+            },
+        })
+    }
+    return fresh
 }
 
 async function generateInterviewReport({
@@ -488,219 +528,61 @@ async function generateInterviewReport({
         company,
         jobProfile,
         yearsOfExperience,
-        jobDescription,
     })
+    const compactContext = buildCompactContext({
+        role: jobProfile,
+        experience: `${yearsOfExperience} (${band})`,
+        resume,
+        selfDescription,
+        jobDescription,
+        companyResearch,
+    })
+    const corpusText = groundingCorpus({
+        resume,
+        selfDescription,
+        jobDescription,
+        company,
+        jobProfile,
+        companyResearch,
+    })
+    const resumeAndSelfText = `${resume || ""} ${selfDescription || ""}`
+    const jdText = `${jobDescription || ""}`
+    const researchText = researchCorpusText(companyResearch.structured)
 
-    const prompt = `
-        You are a Principal Software Engineer, Senior Technical Lead, and Hiring Manager.
+    const questionsData = await generateStructuredJson({
+        contents: `
+You write interview questions for ${jobProfile} at ${company} (${band}).
+Interview window: ${windowMeta.label}.
 
-        Generate an elite, realistic Interview Report for this specific company and experience level.
-        Company research MUST drive which question types appear.
+Compact candidate context:
+${compactContextJson(compactContext)}
 
-        TARGET:
-        - Company: ${company}
-        - Job profile: ${jobProfile}
-        - Years of experience: ${yearsOfExperience} (${band})
-        - First interview window: ${windowMeta.label} (${roadmapDays} days). The user must still see a ${roadmapDays}-day plan.
-        - Write EXACTLY ${Math.min(7, roadmapDays)} detailed days in preparationPlan.
-        - If ${roadmapDays} > 7, also return laterArc so the server can continue days 8–${roadmapDays} without filler.
+Return 8 to 14 technicalQuestions and 6 to 10 behavioralQuestions.
+Company research in the context MUST drive which round types appear.
+Include system design / HLD only if companyFocus or systemDesign says this company uses it.
+Junior → more fundamentals. Mid/senior → design/leadership only if the company uses them.
+Do not invent employers or tools outside skills, jdSkills, projects, and companyFocus.
 
-        INPUT CONTEXT:
-        - Candidate Resume:
-        ${resume || "Not provided"}
-
-        - Candidate Self Description:
-        ${selfDescription || "Not provided"}
-
-        - Target Job Description (JD):
-        ${jobDescription}
-
-        - COMPANY HIRING RESEARCH (authoritative for question mix):
-        Available: ${companyResearch.available ? "yes" : "no"}
-        ${companyResearch.note || ""}
-        ${researchPromptBlock(companyResearch.structured)}
-        Sources: ${(companyResearch.sources || []).join(", ") || "None"}
-
-        ANALYSIS FIRST:
-        1. Extract technologies and responsibilities from the JD.
-        2. Extract projects, skills, and CO-CURRICULARS from Resume / Self Description (hackathons, clubs, sports, open source, volunteering, societies).
-        3. From company research, decide which rounds this company actually uses at this level.
-           - If research says this company asks system design / HLD at this level, INCLUDE those questions even if they are not on the resume.
-           - If research says they skip system design (common for some consulting / analyst / campus tracks), SKIP system design.
-           - Same rule for DSA, LLD, case interviews, Excel/SQL, domain cases, etc.
-        4. Junior (${band}) → more fundamentals/DSA/role tools. Mid/senior → add design/leadership ONLY if the company uses them.
-        5. Return 8 to 14 technical questions and 6 to 10 behavioral questions.
-
-        GROUNDING RULES:
-        1. Technical questions may be grounded in Resume, JD, OR company hiring research.
-        2. Do NOT invent employers, tools, or degrees that appear in NONE of: Resume, Self Description, JD, company research.
-        3. sourceGrounding examples:
-           - "Resume - Project: E-commerce Backend"
-           - "Job Description - Required Skill: Redis"
-           - "Company research — ${company} ${jobProfile} typically includes HLD"
-        4. mentionedTechnologies: short names from Resume, JD, or research.
-
-        DETAILED SECTION INSTRUCTIONS:
-
-        1. TECHNICAL QUESTIONS:
-           - Follow the company's real mix, not a generic SWE template.
-           - Include resume-depth checks AND company-typical topics (DSA / system design / case / domain) when research supports them.
-           - Include JD gap skills the candidate must prepare.
-
-        2. BEHAVIORAL QUESTIONS:
-           - HR set: tell me about yourself, why ${company}, why this ${jobProfile}, strengths/weaknesses, teamwork, conflict, failure, notice/availability if relevant.
-           - Also ask about CO-CURRICULARS actually listed on the resume or self description.
-           - STAR method in "answer".
-           - sourceGrounding must cite HR + company or the specific resume activity.
-
-        3. SKILL GAPS:
-           - One entry per missing/weak JD or company-required skill.
-           - skill is a short name.
-           - justification: why it is fair.
-           - resources: 1–2 recommended titles with real-looking search URLs is fine; Google and YouTube links will also be added server-side.
-
-        4. PREPARATION PLAN:
-           - Return EXACTLY ${Math.min(7, roadmapDays)} detailed days in preparationPlan (days 1–${Math.min(7, roadmapDays)}).
-           - Each day: day, week, focus, details (why/how, 2–3 sentences), tasks (4–6 concrete items), outcome, resources.
-           - Technical model answers: at most 180 words. Behavioral STAR answers: at most 120 words.
-           - resources: 2–4 study links for THAT day's focus (YouTube explainers, official docs, reputable articles).
-             Each resource: { title, url, source } where source is "youtube", "google", or "web".
-             Prefer real https URLs. Google Search and YouTube search URLs are acceptable if a specific page is unknown.
-           - Close skill gaps, practice company-typical rounds, and ramp intensity toward the interview.
-           - If ${roadmapDays} > 7, fill laterArc: weekThemes (week, theme, skillGaps, questionTypes), spiralSkills, rehearsalFocus.
-             laterArc must be specific to this JD and the gaps — not generic "keep practicing".
-
-        5. MATCH SCORE & ALIGNMENT:
-           - matchScore 0–100.
-           - validation: qualityScore, verdict, verdictExplanation.
-           - title: prefer "${jobProfile} at ${company}" when that fits.
-    `
-
-    const interviewReportData = await generateStructuredJson({
-        contents: prompt,
+Each question needs question, intention, answer, sourceGrounding, groundedSkills, mentionedTechnologies.
+Technical answer: 50–80 words of key points, not an essay.
+Behavioral answer: 60–100 words STAR key points.
+sourceGrounding examples: "Resume - Project: ...", "Job Description - Required Skill: Redis", "Company research — ${company} typically includes HLD".
+        `,
         config: {
             responseMimeType: "application/json",
             responseSchema: {
                 type: "object",
                 properties: {
-                    matchScore: { type: "number" },
-                    title: { type: "string" },
                     technicalQuestions: planQuestionArraySchema(PLAN_TECH.min, PLAN_TECH.max),
                     behavioralQuestions: planQuestionArraySchema(PLAN_BEHAVIOR.min, PLAN_BEHAVIOR.max),
-                    skillGaps: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                skill: { type: "string" },
-                                severity: {
-                                    type: "string",
-                                    enum: ["low", "medium", "high"]
-                                },
-                                justification: { type: "string" },
-                                resources: {
-                                    type: "array",
-                                    items: {
-                                        type: "object",
-                                        properties: {
-                                            title: { type: "string" },
-                                            url: { type: "string" },
-                                            source: { type: "string" }
-                                        }
-                                    }
-                                }
-                            },
-                            required: ["skill", "severity", "justification"]
-                        }
-                    },
-                    preparationPlan: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                day: { type: "number" },
-                                week: { type: "number" },
-                                focus: { type: "string" },
-                                details: { type: "string" },
-                                outcome: { type: "string" },
-                                tasks: {
-                                    type: "array",
-                                    items: { type: "string" }
-                                },
-                                resources: {
-                                    type: "array",
-                                    items: {
-                                        type: "object",
-                                        properties: {
-                                            title: { type: "string" },
-                                            url: { type: "string" },
-                                            source: { type: "string" }
-                                        }
-                                    }
-                                }
-                            },
-                            required: ["day", "week", "focus", "details", "tasks"]
-                        }
-                    },
-                    laterArc: {
-                        type: "object",
-                        properties: {
-                            weekThemes: {
-                                type: "array",
-                                items: {
-                                    type: "object",
-                                    properties: {
-                                        week: { type: "number" },
-                                        theme: { type: "string" },
-                                        skillGaps: { type: "array", items: { type: "string" } },
-                                        questionTypes: { type: "array", items: { type: "string" } },
-                                    },
-                                },
-                            },
-                            spiralSkills: { type: "array", items: { type: "string" } },
-                            rehearsalFocus: { type: "array", items: { type: "string" } },
-                        },
-                    },
-                    validation: {
-                        type: "object",
-                        properties: {
-                            qualityScore: { type: "number" },
-                            verdict: {
-                                type: "string",
-                                enum: [
-                                    "Excellent Alignment",
-                                    "Good Alignment",
-                                    "Moderate Misalignment",
-                                    "Significant Misalignment",
-                                    "Poor Alignment"
-                                ]
-                            },
-                            verdictExplanation: { type: "string" }
-                        },
-                        required: ["qualityScore", "verdict", "verdictExplanation"]
-                    }
                 },
-                required: [
-                    "matchScore",
-                    "title",
-                    "technicalQuestions",
-                    "behavioralQuestions",
-                    "skillGaps",
-                    "preparationPlan",
-                    "validation"
-                ]
-            }
-        }
-    }, { route: "generateInterviewReport" })
+                required: ["technicalQuestions", "behavioralQuestions"],
+            },
+        },
+    }, { route: "generateInterviewQuestions" })
 
-    const researchText = researchCorpusText(companyResearch.structured)
-    const corpusText = `${resume || ""} ${selfDescription || ""} ${jobDescription || ""} ${researchText} ${company || ""} ${jobProfile || ""}`
-    const resumeAndSelfText = `${resume || ""} ${selfDescription || ""}`
-    const jdText = `${jobDescription || ""}`
-    const researchBlock = researchPromptBlock(companyResearch.structured)
-
-    const initialTechnical = partitionPlanQuestions(interviewReportData.technicalQuestions, corpusText)
-    const initialBehavioral = partitionBehavioralQuestions(interviewReportData.behavioralQuestions)
+    const initialTechnical = partitionPlanQuestions(questionsData.technicalQuestions, corpusText)
+    const initialBehavioral = partitionBehavioralQuestions(questionsData.behavioralQuestions)
     const initialTotal = initialTechnical.accepted.length + initialTechnical.rejected
         + initialBehavioral.accepted.length + initialBehavioral.rejected
     const initialVerified = initialTechnical.accepted.length + initialBehavioral.accepted.length
@@ -721,13 +603,10 @@ async function generateInterviewReport({
             behaviorMissing,
             acceptedTechnical: technical,
             acceptedBehavioral: behavioral,
-            resume,
-            selfDescription,
-            jobDescription,
+            compactContext,
             company,
             jobProfile,
             band,
-            researchBlock,
         })
         const moreTechnical = partitionPlanQuestions(filled.technicalQuestions, corpusText)
         const moreBehavioral = partitionBehavioralQuestions(filled.behavioralQuestions)
@@ -744,8 +623,70 @@ async function generateInterviewReport({
         throw incompleteQuestionSet("Could not assemble a complete interview plan. Please try again.")
     }
 
-    // 3. Skill gaps — verify AI gaps + programmatically detect JD techs missing from resume
-    const aiSkillGaps = (interviewReportData.skillGaps || []).map((sg) => {
+    const analysisData = await generateStructuredJson({
+        contents: `
+Score this candidate for ${jobProfile} at ${company} (${band}).
+Prefer title "${jobProfile} at ${company}" when that fits.
+
+Compact candidate context:
+${compactContextJson(compactContext)}
+
+Accepted technical questions (titles only):
+${technical.map((question) => question.question).join("\n")}
+
+Accepted behavioral questions (titles only):
+${behavioral.map((question) => question.question).join("\n")}
+
+Return matchScore 0–100, short skillGaps for JD or company skills missing from the candidate, and validation.
+skillGaps: skill, severity (low/medium/high), one-sentence justification. No resources. No roadmap. No questions.
+        `,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: "object",
+                properties: {
+                    matchScore: { type: "number" },
+                    title: { type: "string" },
+                    skillGaps: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                skill: { type: "string" },
+                                severity: {
+                                    type: "string",
+                                    enum: ["low", "medium", "high"],
+                                },
+                                justification: { type: "string" },
+                            },
+                            required: ["skill", "severity", "justification"],
+                        },
+                    },
+                    validation: {
+                        type: "object",
+                        properties: {
+                            qualityScore: { type: "number" },
+                            verdict: {
+                                type: "string",
+                                enum: [
+                                    "Excellent Alignment",
+                                    "Good Alignment",
+                                    "Moderate Misalignment",
+                                    "Significant Misalignment",
+                                    "Poor Alignment",
+                                ],
+                            },
+                            verdictExplanation: { type: "string" },
+                        },
+                        required: ["qualityScore", "verdict", "verdictExplanation"],
+                    },
+                },
+                required: ["matchScore", "title", "skillGaps", "validation"],
+            },
+        },
+    }, { route: "generateInterviewAnalysis" })
+
+    const aiSkillGaps = (analysisData.skillGaps || []).map((sg) => {
         const existsInJD = skillAppearsInText(sg.skill, jdText)
         const existsInResearch = skillAppearsInText(sg.skill, researchText)
         const existsInResume = skillAppearsInText(sg.skill, resumeAndSelfText)
@@ -760,7 +701,7 @@ async function generateInterviewReport({
                     : "VERIFIED_FAIR_GAP_COMPANY_RESEARCH"
                 : existsInResume
                     ? "UNFAIR_GAP_CANDIDATE_ALREADY_HAS_SKILL"
-                    : "UNVERIFIED_GAP_NOT_IN_JD"
+                    : "UNVERIFIED_GAP_NOT_IN_JD",
         }
     })
 
@@ -785,22 +726,33 @@ async function generateInterviewReport({
                     severity: "high",
                     justification: `Required in the Job Description but not found in the candidate's Resume / Self Description.`,
                     isVerifiedFair: true,
-                    verificationStatus: "VERIFIED_FAIR_GAP_PROGRAMMATIC"
+                    verificationStatus: "VERIFIED_FAIR_GAP_PROGRAMMATIC",
                 })
             }
         }
     }
 
-    // Prefer fair gaps only so sidebar shows real missing skills (Redis, Kafka, etc.)
     const finalSkillGaps = [
         ...aiSkillGaps.filter((g) => g.isVerifiedFair),
-        ...programmaticGaps
+        ...programmaticGaps,
     ]
-
     const finalSkillGapsWithResources = finalSkillGaps.map(withSkillGapResources)
+    const coreDays = buildCoreRoadmap({
+        targetDays: roadmapDays,
+        company,
+        jobProfile,
+        skillGaps: finalSkillGapsWithResources,
+        technicalQuestions: technical,
+        behavioralQuestions: behavioral,
+        compactContext,
+    })
     const normalizedPlan = expandRoadmap({
-        coreDays: interviewReportData.preparationPlan || [],
-        laterArc: interviewReportData.laterArc,
+        coreDays,
+        laterArc: {
+            spiralSkills: finalSkillGapsWithResources.map((gap) => gap.skill).filter(Boolean),
+            rehearsalFocus: technical.slice(0, 3).map((question) => question.question),
+            weekThemes: [],
+        },
         targetDays: roadmapDays,
         skillGaps: finalSkillGapsWithResources,
         technicalQuestions: technical,
@@ -809,17 +761,17 @@ async function generateInterviewReport({
 
     logResources("generateInterviewReport")
     return {
-        ...interviewReportData,
-        title: interviewReportData.title || `${jobProfile} at ${company}`,
+        matchScore: analysisData.matchScore,
+        title: analysisData.title || `${jobProfile} at ${company}`,
         technicalQuestions: technical,
         behavioralQuestions: behavioral,
         skillGaps: finalSkillGapsWithResources,
         preparationPlan: normalizedPlan,
         companyResearch,
         validation: {
-            ...interviewReportData.validation,
-            groundingAccuracyScore
-        }
+            ...analysisData.validation,
+            groundingAccuracyScore,
+        },
     }
 }
 

@@ -175,6 +175,13 @@ CREATE TABLE IF NOT EXISTS feedback_messages (
 CREATE INDEX IF NOT EXISTS idx_feedback_created
     ON feedback_messages (created_at DESC);
 
+CREATE TABLE IF NOT EXISTS company_research_cache (
+    company_key TEXT PRIMARY KEY,
+    company_label TEXT NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 INSERT INTO quota_usage_events (user_id, period, kind, status, result_id, finalized_at, created_at)
 SELECT
     ir.user_id,
