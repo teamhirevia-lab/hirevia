@@ -43,6 +43,24 @@ a {
     color: inherit;
 }
 
+.brand-logo {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    line-height: 0;
+    text-decoration: none;
+
+    img {
+        height: 1.85rem;
+        width: auto;
+    }
+}
+
+img.brand-logo {
+    height: 1.85rem;
+    width: auto;
+}
+
 h1,
 h2 {
     font-family: var(--font-serif);

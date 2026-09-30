@@ -7,10 +7,11 @@ import { useVideoAnalyzer } from '../hooks/useVideoAnalyzer.js'
 import { buildInterviewVocabulary } from '../config/sttConfig.js'
 import '../styles/mockInterview.scss'
 import { useMockInterview } from '../hooks/useMockInterview.js'
-import { useNavigate, useParams, Link } from 'react-router'
+import { useNavigate, useParams } from 'react-router'
 import { idOf } from '../../../shared/id.js'
 import LoadingScreen from '../../../shared/LoadingScreen.jsx'
 import AppShell from '../../../shared/AppShell.jsx'
+import BrandLogo from '../../../shared/BrandLogo.jsx'
 import { useAuth } from '../../auth/hooks/useAuth.js'
 
 const percent = (value) => Math.round((Number(value) || 0) * 100)
@@ -45,6 +46,7 @@ const MockInterview = () => {
     speechError,
     ready: whisperReady,
     processing: transcribing,
+    transcribePhase,
     sttMode,
     startListening,
     stopListening,
@@ -367,7 +369,7 @@ const MockInterview = () => {
         <section className="choose-section choose-section--shell">
           <div className="choose-section__card">
             <h1>Start a live mock</h1>
-            <p>Answer out loud on camera. Follow-ups appear when an answer needs more depth.</p>
+            <p>Eight technical questions, with follow-ups when an answer needs more depth, then five behavioral questions.</p>
             {mockQuota && (
               <p className="choose-section__quota">
                 {mockQuota.remaining} of {mockQuota.cap + mockQuota.granted} mocks left this month.
@@ -379,14 +381,7 @@ const MockInterview = () => {
                 onClick={() => handleSectionSelect("technical")}
                 disabled={mocksLeft <= 0}
               >
-                Start with technical
-              </button>
-              <button
-                className="button secondary-button"
-                onClick={() => handleSectionSelect("behavioral")}
-                disabled={mocksLeft <= 0}
-              >
-                Start with behavioral
+                Start mock
               </button>
             </div>
             {error && <p className="form-error" role="alert">{error}</p>}
@@ -421,16 +416,13 @@ const MockInterview = () => {
   return (
     <div className='mock-session'>
       <header className='mock-session__top'>
-        <Link
+        <BrandLogo
           to={`/interview/${interviewId}`}
-          className='brand-mark'
           onClick={(event) => {
             event.preventDefault()
             handlePause()
           }}
-        >
-          Hirevia
-        </Link>
+        />
         <div className='mock-session__meta'>
           <span className={`section-chip ${section}`}>{section}</span>
           <span>Question {questionIndex + 1} of {totalInSection}</span>
@@ -505,7 +497,7 @@ const MockInterview = () => {
                 onClick={handleStartAnswering}
                 disabled={!currentQuestion || isListening || isAnalyzing || isSubmitting || transcribing}
               >
-                {isListening ? "Listening..." : transcribing ? "Processing your answer..." : "Start answering"}
+                {isListening ? "Listening..." : transcribePhase === "tail" ? "Finishing transcription..." : "Start answering"}
               </button>
 
               <button
@@ -520,7 +512,7 @@ const MockInterview = () => {
             <button
               className='button primary-button'
               onClick={handleNextQuestion}
-              disabled={isSubmitting || !draftAnswer.trim() || (transcribing && !userEdited)}
+              disabled={isSubmitting || !draftAnswer.trim() || transcribePhase === "tail" || (transcribing && !userEdited)}
             >
               {isSubmitting ? "Saving..." : "Next"}
             </button>
@@ -546,16 +538,25 @@ const MockInterview = () => {
           )}
           <p className='q-card__intention'>
             {whisperReady && sttMode === "whisper" && "Voice transcription ready. Audio stays in this browser."}
-            {sttMode === "webkit" && "Using browser speech recognition. Please review the transcript before continuing."}
+            {sttMode === "webkit" && "Browser speech recognition. Please review the transcript before continuing."}
             {sttMode === "manual" && "Type your answer. Voice transcription is unavailable on this device."}
             {!whisperReady && sttMode === "whisper" && "Preparing voice transcription in the background..."}
           </p>
-          {transcribing && (
-            <p className='q-card__intention' role="status">Processing your answer...</p>
+          {transcribePhase === "live" && (
+            <p className='q-card__intention' role="status">Transcribing...</p>
+          )}
+          {transcribePhase === "tail" && (
+            <p className='q-card__intention' role="status">Finishing transcription...</p>
           )}
 
           <div className='answer-preview'>
-            <h3>Your answer {isListening ? <span className='answer-preview__live'>Live</span> : transcribing ? <span className='answer-preview__live'>Processing</span> : null}</h3>
+            <h3>Your answer {transcribePhase === "live"
+              ? <span className='answer-preview__live'>Transcribing...</span>
+              : transcribePhase === "tail"
+                ? <span className='answer-preview__live'>Finishing transcription...</span>
+                : isListening
+                  ? <span className='answer-preview__live'>Live</span>
+                  : null}</h3>
             <textarea
               className='answer-preview__input'
               value={draftAnswer}

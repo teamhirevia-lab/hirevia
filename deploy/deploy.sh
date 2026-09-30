@@ -24,6 +24,7 @@ set +a
 : "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
 : "${POSTGRES_DB:?POSTGRES_DB is required}"
 : "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
+: "${API_PORT:=3001}"
 
 if [[ ! -f "$ROOT/Backend/.env" ]]; then
     echo "Create Backend/.env before deploying."
@@ -31,7 +32,7 @@ if [[ ! -f "$ROOT/Backend/.env" ]]; then
     echo "DATABASE_URL=postgres://${POSTGRES_USER}:<password>@127.0.0.1:5432/${POSTGRES_DB}"
     echo "REDIS_URL=redis://:<redis-password>@127.0.0.1:6379"
     echo "CLIENT_ORIGINS=https://${DOMAIN}"
-    echo "PORT=3000"
+    echo "PORT=${API_PORT:-3001}"
     echo "Also set JWT_SECRET, GOOGLE_GENAI_API_KEY, ADMIN_EMAIL, and ADMIN_PASSWORD."
     exit 1
 fi
@@ -56,7 +57,11 @@ sudo mkdir -p "$WEB_ROOT"
 sudo rsync -a --delete "$ROOT/Frontend/dist/" "$WEB_ROOT/"
 
 sudo a2enmod proxy proxy_http headers rewrite ssl
-envsubst '${DOMAIN} ${WEB_ROOT}' < "$ROOT/deploy/apache-hirevia.conf" | sudo tee /etc/apache2/sites-available/hirevia.conf >/dev/null
+sudo tee /etc/apache2/conf-available/wasm-mime.conf >/dev/null <<'EOF'
+AddType application/wasm .wasm
+EOF
+sudo a2enconf wasm-mime >/dev/null
+envsubst '${DOMAIN} ${WEB_ROOT} ${API_PORT}' < "$ROOT/deploy/apache-hirevia.conf" | sudo tee /etc/apache2/sites-available/hirevia.conf >/dev/null
 sudo a2ensite hirevia.conf
 sudo apache2ctl configtest
 sudo systemctl reload apache2

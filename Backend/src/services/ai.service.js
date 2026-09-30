@@ -35,8 +35,8 @@ const {
 
 const PLAN_TECH = { min: 8, max: 14 }
 const PLAN_BEHAVIOR = { min: 6, max: 10 }
-const MOCK_TECH = { min: 5, max: 5 }
-const MOCK_BEHAVIOR = { min: 4, max: 4 }
+const MOCK_TECH = { min: 8, max: 8 }
+const MOCK_BEHAVIOR = { min: 5, max: 5 }
 const MAX_REPLACEMENT_ROUNDS = 2
 
 const ai = new GoogleGenAI({
@@ -44,12 +44,12 @@ const ai = new GoogleGenAI({
 })
 
 const GEMINI_REPORT_MODELS = [
-    "gemini-2.5-flash-lite",
     "gemini-3.5-flash-lite",
 ]
 const GEMINI_RESEARCH_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
 ]
 const GEMINI_FAST = GEMINI_REPORT_MODELS[0]
 const GEMINI_MODELS = GEMINI_REPORT_MODELS
@@ -164,8 +164,10 @@ async function generateStructuredJson(params, { route, fallbackModel = GEMINI_RE
         return parseGeminiJson(response.text)
     } catch (err) {
         if (err?.code !== "GEMINI_PARSE") throw err
+        const retryModel = fallbackModel || GEMINI_REPORT_MODELS[0]
+        if (!retryModel) throw err
         const response = await generateContentWithRetry(params, {
-            models: [fallbackModel],
+            models: [retryModel],
             maxAttemptsPerModel: 1,
             route,
         })
@@ -1516,7 +1518,8 @@ Company hiring signals:
 ${researchBlock}
 
 Rules:
-- Create exactly 5 technical and exactly 4 behavioral questions.
+- Create exactly 8 technical and exactly 5 behavioral questions.
+- Do not write follow-ups here. Follow-ups are asked live after an answer.
 - Match this company's real mix: include system design / HLD only if research says this company asks it at this level. Skip it otherwise.
 - Include at least one HR question and one question about a co-curricular or project from the compact context when those exist.
 - Questions must be new angles, deeper scenarios, or different skills than the avoided list.
@@ -1635,7 +1638,7 @@ If you follow up, the question must reference something the candidate actually s
             },
         },
     }, {
-        models: [GEMINI_FAST],
+        models: GEMINI_REPORT_MODELS,
         maxAttemptsPerModel: 1,
         timeoutMs: 20_000,
         route: "generateFollowUpQuestion",

@@ -258,8 +258,8 @@ const AdminPanel = () => {
                                     <thead>
                                         <tr>
                                             <th>User</th>
-                                            <th>Reports this month</th>
-                                            <th>Mocks this month</th>
+                                            <th>Reports</th>
+                                            <th>Mocks</th>
                                             <th>Add remaining</th>
                                         </tr>
                                     </thead>
@@ -273,6 +273,11 @@ const AdminPanel = () => {
                                                     <div className="admin-muted">
                                                         Last sign in {formatWhen(user.lastLoginAt)}
                                                     </div>
+                                                    {user.renewsAt && (
+                                                        <div className="admin-muted">
+                                                            Renews {new Date(user.renewsAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td>
                                                     {user.reports.used} used, {user.reports.remaining} left

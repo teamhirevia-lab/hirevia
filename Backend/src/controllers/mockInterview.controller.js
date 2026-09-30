@@ -39,7 +39,6 @@ async function createMockInterviewController(req, res) {
     let reservation = null
     try {
         const { interviewId } = req.params
-        const requestedSection = req.body?.section || null
 
         const interviewReport = await interviewReportRepository.findByIdForUser(
             interviewId,
@@ -77,7 +76,7 @@ async function createMockInterviewController(req, res) {
             userId: req.user.id,
             interviewReportId: interviewId,
             questions,
-            currentSection: requestedSection,
+            currentSection: "technical",
         })
 
         await quotaService.complete(reservation.event.id, { resultId: mockInterviewReport.id })
@@ -265,6 +264,21 @@ async function generateMockInterviewReportController(req, res) {
             await releaseScoreLock(mockId)
         }
     } catch (err) {
+        const aiMessage = geminiClientMessage(err)
+        if (aiMessage) {
+            return sendError(res, 503, aiMessage, {
+                err,
+                logLabel: "MOCK REPORT ERROR:",
+                expose: true,
+            })
+        }
+        if (err?.code === "GEMINI_TIMEOUT" || err?.code === "GEMINI_PARSE" || err?.status === 404) {
+            return sendError(res, 503, "Could not score this mock right now. Please try again.", {
+                err,
+                logLabel: "MOCK REPORT ERROR:",
+                expose: true,
+            })
+        }
         return sendError(res, 500, "Failed to generate mock interview report", {
             err,
             logLabel: "MOCK REPORT ERROR:",
@@ -458,6 +472,12 @@ async function submitMockAnswerController(req, res) {
                 completedSections,
             }
         )
+
+        if (!updated) {
+            return res.status(404).json({
+                message: "Mock Interview not found"
+            })
+        }
 
         const nextQuestion = interviewComplete
             ? null

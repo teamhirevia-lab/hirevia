@@ -1,5 +1,6 @@
 import { Link } from "react-router"
 import { ArrowLeft, LockKey, ShieldCheck } from "@phosphor-icons/react"
+import BrandLogo from "../../../shared/BrandLogo"
 import "../auth.screen.scss"
 
 const AuthLayout = ({ mode, onModeChange, children }) => {
@@ -11,10 +12,7 @@ const AuthLayout = ({ mode, onModeChange, children }) => {
             <header className="auth-screen__bar">
                 <div className="auth-screen__bar-inner">
                     <div className="auth-screen__brand-row">
-                        <Link to="/" className="auth-screen__brand">
-                            <span aria-hidden="true">H</span>
-                            Hirevia
-                        </Link>
+                        <BrandLogo />
                     </div>
                     <Link to="/" className="auth-screen__back">
                         <ArrowLeft size={16} />

@@ -2,6 +2,7 @@ import { Link, useLocation } from "react-router"
 import { ArrowUpRight } from "@phosphor-icons/react"
 import { useAuth } from "../auth/hooks/useAuth"
 import { homePathFor } from "../../shared/homePath"
+import BrandLogo from "../../shared/BrandLogo"
 import "./guestNav.scss"
 
 const GuestNav = () => {
@@ -10,7 +11,7 @@ const GuestNav = () => {
 
     return (
         <header className="guest-nav">
-            <Link to="/" className="brand-mark">Hirevia</Link>
+            <BrandLogo />
             <nav aria-label="Primary">
                 {user ? (
                     <Link to={homePathFor(user)} className="button primary-button">

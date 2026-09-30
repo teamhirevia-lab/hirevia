@@ -7,7 +7,7 @@ const LoadingScreen = ({
 }) => {
     return (
         <main className={`app-loading ${compact ? "app-loading--compact" : ""}`} role="status" aria-live="polite">
-            <div className="app-loading__mark">Hirevia</div>
+            <img className="app-loading__mark" src="/hirevia-logo.png" alt="Hirevia" />
             <div className="app-loading__orbit" aria-hidden="true">
                 <span />
             </div>

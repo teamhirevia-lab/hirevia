@@ -24,29 +24,21 @@
     box-shadow: none;
 }
 
-.brand-mark {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.55rem;
-    font-weight: 560;
-    letter-spacing: -0.02em;
-    text-decoration: none;
-    font-size: 1.05rem;
+.app-shell__menu {
+    display: none;
+    width: 2.75rem;
+    height: 2.75rem;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
     color: var(--ink);
+    cursor: pointer;
+    flex-shrink: 0;
 
-    &::before {
-        content: "H";
-        width: 1.75rem;
-        height: 1.75rem;
-        display: grid;
-        place-items: center;
-        border-radius: 2px;
-        background: var(--accent);
-        color: var(--canvas);
-        font-family: var(--font-serif);
-        font-size: 1.05rem;
-        font-weight: 450;
-        line-height: 1;
+    &:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
     }
 }
 
@@ -280,7 +272,7 @@
 }
 
 .app-shell__main {
-    width: min(calc(100% - 2rem), var(--max));
+    width: min(calc(100% - 2.5rem), var(--max));
     margin: 0 auto;
     padding: 1.75rem 0 4rem;
 }
@@ -304,40 +296,64 @@
 
 @media (max-width: 767px) {
     .app-shell__main {
-        width: calc(100% - 1.1rem);
-        padding: 1.1rem 0 3rem;
+        width: min(calc(100% - 2.5rem), var(--max));
+        padding: 1.25rem 0 3rem;
     }
 
     .app-shell__bar {
         width: 100%;
         top: 0;
-        gap: 0.5rem;
-        padding: 0.45rem 1rem;
-        flex-wrap: wrap;
+        gap: 0.55rem;
+        padding: 0.55rem 1.25rem;
+        flex-wrap: nowrap;
         max-height: none;
         border-radius: 0;
     }
 
+    .brand-logo img {
+        height: 1.45rem;
+    }
+
+    .app-shell__menu {
+        display: grid;
+    }
+
     .app-shell__nav {
-        order: 3;
-        width: 100%;
-        padding: 0 0.4rem 0.3rem;
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        scrollbar-width: none;
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: 4;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.15rem;
+        width: auto;
+        margin: 0;
+        padding: 0.4rem 1.25rem 0.75rem;
+        background: var(--surface);
+        border-bottom: 1px solid var(--line);
+        box-shadow: var(--shadow);
+
+        &.is-open {
+            display: flex;
+        }
     }
 
-}
-
-@media (max-width: 480px) {
-    .app-shell__main {
-        width: calc(100% - 0.7rem);
-        padding: 0.85rem 0 2.5rem;
+    .app-shell__link {
+        min-height: 2.75rem;
+        display: flex;
+        align-items: center;
+        padding: 0.7rem 0.35rem;
     }
 
-    .app-shell__bar {
-        width: 100%;
-        padding: 0.4rem 0.75rem;
+    .quota-button {
+        padding: 0.28rem 0.55rem;
+        font-size: 0.72rem;
+    }
+
+    .quota-button__renew {
+        font-size: 0.62rem;
     }
 }
 

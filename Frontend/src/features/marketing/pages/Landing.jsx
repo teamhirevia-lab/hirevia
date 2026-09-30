@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Link } from "react-router"
 import {
     ArrowRight,
@@ -11,6 +12,7 @@ import {
     Eye,
     FileText,
     Flag,
+    List,
     LockKey,
     Microphone,
     MicrophoneSlash,
@@ -57,6 +59,7 @@ const days = [
 
 const Landing = () => {
     const { user } = useAuth()
+    const [menuOpen, setMenuOpen] = useState(false)
     const startTo = user ? homePathFor(user) : "/login?mode=register"
     const accountTo = user ? homePathFor(user) : "/login"
     const accountLabel = user ? "Workspace" : "Sign in"
@@ -67,11 +70,10 @@ const Landing = () => {
             <div className="lp-top">
             <header className="lp-header">
                 <div className="lp-wrap lp-header__inner">
-                    <Link to="/" className="lp-brand">
-                        <span className="lp-mark" aria-hidden="true">H</span>
-                        <span className="lp-brand__name">Hirevia</span>
+                    <Link to="/" className="lp-brand" onClick={() => setMenuOpen(false)}>
+                        <img className="lp-brand__logo" src="/hirevia-logo.png" alt="Hirevia" />
                         <span className="lp-brand__rule" aria-hidden="true" />
-                        <span className="lp-brand__tag">Executive briefs</span>
+                        <span className="lp-brand__tag" aria-hidden="true">Executive briefs</span>
                     </Link>
                     <nav className="lp-nav" aria-label="Primary">
                         <a href="#how-it-works">How it works</a>
@@ -91,13 +93,23 @@ const Landing = () => {
                             </Link>
                         )}
                     </div>
+                    <button
+                        type="button"
+                        className="lp-menu"
+                        aria-expanded={menuOpen}
+                        aria-controls="landing-menu"
+                        aria-label={menuOpen ? "Close menu" : "Open menu"}
+                        onClick={() => setMenuOpen((open) => !open)}
+                    >
+                        {menuOpen ? <X size={18} /> : <List size={18} />}
+                    </button>
                 </div>
             </header>
-            <nav className="lp-nav--mobile" aria-label="On this page">
-                <a href="#how-it-works">How it works</a>
-                <a href="#features">Features</a>
-                <a href="#mock-interview">Mock</a>
-                <a href="#privacy">Privacy</a>
+            <nav id="landing-menu" className={`lp-nav-panel ${menuOpen ? "is-open" : ""}`} aria-label="On this page">
+                <a href="#how-it-works" onClick={() => setMenuOpen(false)}>How it works</a>
+                <a href="#features" onClick={() => setMenuOpen(false)}>Features</a>
+                <a href="#mock-interview" onClick={() => setMenuOpen(false)}>Mock interview</a>
+                <a href="#privacy" onClick={() => setMenuOpen(false)}>Privacy</a>
             </nav>
             </div>
 
@@ -778,8 +790,7 @@ const Landing = () => {
                     <div className="lp-footer__grid">
                         <div>
                             <Link to="/" className="lp-brand">
-                                <span className="lp-mark" aria-hidden="true">H</span>
-                                <span className="lp-brand__name">Hirevia</span>
+                                <img className="lp-brand__logo" src="/hirevia-logo.png" alt="Hirevia" />
                             </Link>
                             <p className="lp-lead" style={{ fontSize: "0.8125rem", marginTop: "0.6rem" }}>
                                 A preparation plan and a scored mock, built from the role you are actually interviewing for.

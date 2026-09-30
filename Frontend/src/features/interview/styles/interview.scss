@@ -1033,6 +1033,16 @@
 }
 
 @media (max-width: 767px) {
+    .plan-hero h1,
+    .plan-kicker {
+        overflow-wrap: anywhere;
+    }
+
+    .plan-tabs {
+        margin-inline: 0;
+        padding-inline: 0;
+    }
+
     .plan-hero {
         grid-template-columns: 1fr;
         grid-template-areas:

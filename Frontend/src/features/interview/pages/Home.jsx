@@ -118,7 +118,7 @@ const Home = () => {
     return (
         <div className='home-page'>
             <header className='home-nav'>
-                <span className='brand-mark'>Hirevia</span>
+                <img className="brand-logo" src="/hirevia-logo.png" alt="Hirevia" />
                 <button
                     className='button secondary-button logout-btn'
                     onClick={async () => {

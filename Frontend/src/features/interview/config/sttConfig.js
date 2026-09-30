@@ -1,6 +1,6 @@
-const WHISPER_BASE = "Xenova/whisper-base.en"
-const WHISPER_TINY = "Xenova/whisper-tiny.en"
-export const LANGUAGE = "english"
+const WHISPER_BASE = "onnx-community/whisper-base.en"
+export const WHISPER_TINY = "onnx-community/whisper-tiny.en"
+export const LANGUAGE = "en"
 export const SAMPLE_RATE = 16_000
 export const MAX_RECORDING_MS = 4 * 60 * 1000
 

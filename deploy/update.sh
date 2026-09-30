@@ -22,8 +22,9 @@ set -a
 source "$ENV_FILE"
 set +a
 
-: "${WEB_ROOT:?WEB_ROOT is required}"
 : "${DOMAIN:?DOMAIN is required}"
+: "${WEB_ROOT:?WEB_ROOT is required}"
+: "${API_PORT:=3001}"
 
 if ! command -v envsubst >/dev/null; then
     echo "Install gettext-base so envsubst is available."
@@ -46,7 +47,12 @@ VITE_API_URL= npm run build
 
 sudo rsync -a --delete "$ROOT/Frontend/dist/" "$WEB_ROOT/"
 
-envsubst '${DOMAIN} ${WEB_ROOT}' < "$ROOT/deploy/apache-hirevia.conf" | sudo tee /etc/apache2/sites-available/hirevia.conf >/dev/null
+sudo tee /etc/apache2/conf-available/wasm-mime.conf >/dev/null <<'EOF'
+AddType application/wasm .wasm
+EOF
+sudo a2enconf wasm-mime >/dev/null
+
+envsubst '${DOMAIN} ${WEB_ROOT} ${API_PORT}' < "$ROOT/deploy/apache-hirevia.conf" | sudo tee /etc/apache2/sites-available/hirevia.conf >/dev/null
 sudo apache2ctl configtest
 sudo systemctl reload apache2
 

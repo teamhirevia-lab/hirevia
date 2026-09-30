@@ -1,27 +1,26 @@
 import { useEffect, useRef, useState } from "react"
-import { Link, NavLink, useNavigate } from "react-router"
-import { ArrowUpRight, ChatText, SignOut, User } from "@phosphor-icons/react"
+import { Link, NavLink, useLocation, useNavigate } from "react-router"
+import { ArrowUpRight, ChatText, List, SignOut, User, X } from "@phosphor-icons/react"
 import { useAuth } from "../features/auth/hooks/useAuth"
+import BrandLogo from "./BrandLogo"
 import "./appShell.scss"
 
-function renewalLabel(period) {
-    const match = /^(\d{4})-(\d{2})$/.exec(period || "")
-    const now = new Date()
-    const year = match ? Number(match[1]) : now.getUTCFullYear()
-    const month = match ? Number(match[2]) : now.getUTCMonth() + 1
-    const renews = new Date(Date.UTC(year, month, 1))
+function renewalLabel(renewsAt) {
+    const renews = new Date(renewsAt || "")
+    if (Number.isNaN(renews.getTime())) return ""
     return renews.toLocaleDateString("en-GB", {
         day: "numeric",
         month: "short",
-        timeZone: "UTC",
     })
 }
 
 const AppShell = ({ children }) => {
     const { user, handleLogout } = useAuth()
     const navigate = useNavigate()
+    const location = useLocation()
     const profileSlotRef = useRef(null)
     const [profileOpen, setProfileOpen] = useState(false)
+    const [menuOpen, setMenuOpen] = useState(false)
 
     useEffect(() => {
         if (!profileOpen) return undefined
@@ -39,17 +38,23 @@ const AppShell = ({ children }) => {
         }
     }, [profileOpen])
 
+    useEffect(() => {
+        setMenuOpen(false)
+        setProfileOpen(false)
+    }, [location.pathname])
+
     const reportsLeft = user?.quota?.reports?.remaining
     const mocksLeft = user?.quota?.mocks?.remaining
     const showQuota = user?.role !== "admin" && reportsLeft != null && mocksLeft != null
-    const renewsOn = renewalLabel(user?.quota?.period)
+    const renewsOn = renewalLabel(user?.quota?.renewsAt)
+    const homeTo = user?.role === "admin" ? "/admin" : "/app"
 
     return (
         <div className="app-shell">
             <a className="skip-link" href="#main">Skip to content</a>
             <header className="app-shell__bar">
-                <Link to={user?.role === "admin" ? "/admin" : "/app"} className="brand-mark">Hirevia</Link>
-                <nav className="app-shell__nav" aria-label="Workspace">
+                <BrandLogo to={homeTo} />
+                <nav className={`app-shell__nav ${menuOpen ? "is-open" : ""}`} id="workspace-menu" aria-label="Workspace">
                     {user?.role === "admin" ? (
                         <NavLink to="/admin" className="app-shell__link">Admin</NavLink>
                     ) : (
@@ -64,7 +69,7 @@ const AppShell = ({ children }) => {
                         <span
                             className="quota-button"
                             role="status"
-                            aria-label={`This month: ${reportsLeft} reports and ${mocksLeft} mocks left. Renews ${renewsOn}.`}
+                            aria-label={`${reportsLeft} reports and ${mocksLeft} mocks left. Renews ${renewsOn}.`}
                         >
                             <span className="quota-button__counts">
                                 <span>{reportsLeft} reports</span>
@@ -113,6 +118,16 @@ const AppShell = ({ children }) => {
                         )}
                     </div>
                 </div>
+                <button
+                    type="button"
+                    className="app-shell__menu"
+                    aria-expanded={menuOpen}
+                    aria-controls="workspace-menu"
+                    aria-label={menuOpen ? "Close menu" : "Open menu"}
+                    onClick={() => setMenuOpen((open) => !open)}
+                >
+                    {menuOpen ? <X size={18} /> : <List size={18} />}
+                </button>
             </header>
             <main id="main" className="app-shell__main">
                 {children}

@@ -28,6 +28,54 @@ function monthBounds(date = new Date()) {
     return { start, end }
 }
 
+function periodKey(date) {
+    const year = date.getUTCFullYear()
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0")
+    const day = String(date.getUTCDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
+}
+
+function addUtcMonths(date, months) {
+    const day = date.getUTCDate()
+    const shifted = new Date(Date.UTC(
+        date.getUTCFullYear(),
+        date.getUTCMonth() + months,
+        1,
+        date.getUTCHours(),
+        date.getUTCMinutes(),
+        date.getUTCSeconds(),
+        date.getUTCMilliseconds()
+    ))
+    const lastDay = new Date(Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, 0)).getUTCDate()
+    shifted.setUTCDate(Math.min(day, lastDay))
+    return shifted
+}
+
+function quotaWindow(anchorInput, now = new Date()) {
+    const parsed = anchorInput ? new Date(anchorInput) : now
+    const anchor = Number.isNaN(parsed.getTime()) ? now : parsed
+
+    if (now < anchor) {
+        return { start: anchor, end: addUtcMonths(anchor, 1), period: periodKey(anchor) }
+    }
+
+    let low = 0
+    let high = 1
+    while (addUtcMonths(anchor, high) <= now && high < 2400) {
+        low = high
+        high *= 2
+    }
+    while (low + 1 < high) {
+        const mid = Math.floor((low + high) / 2)
+        if (addUtcMonths(anchor, mid) <= now) low = mid
+        else high = mid
+    }
+
+    const start = addUtcMonths(anchor, low)
+    const end = addUtcMonths(anchor, low + 1)
+    return { start, end, period: periodKey(start) }
+}
+
 function toBucket({ used, cap, granted }) {
     const remaining = Math.max(0, Number(cap) + Number(granted) - Number(used))
     return {
@@ -81,20 +129,21 @@ async function countAll(table, userId) {
     return Number(row?.n || 0)
 }
 
-async function grantsForPeriod(userId, kind, period) {
+async function grantsForPeriod(userId, kind, window) {
     if (kind === "pdf") return 0
     const row = await queryOne(
         `
         SELECT COALESCE(SUM(amount), 0)::int AS n
         FROM quota_grants
-        WHERE user_id = $1 AND kind = $2 AND period = $3
+        WHERE user_id = $1 AND kind = $2
+          AND created_at >= $3 AND created_at < $4
         `,
-        [userId, kind, period]
+        [userId, kind, window.start, window.end]
     )
     return Number(row?.n || 0)
 }
 
-async function countActiveEvents(userId, kind, period, client = null) {
+async function countActiveEvents(userId, kind, window, client = null) {
     const run = client
         ? (text, params) => client.query(text, params).then((r) => r.rows[0] || null)
         : queryOne
@@ -102,10 +151,11 @@ async function countActiveEvents(userId, kind, period, client = null) {
         `
         SELECT COUNT(*)::int AS n
         FROM quota_usage_events
-        WHERE user_id = $1 AND kind = $2 AND period = $3
+        WHERE user_id = $1 AND kind = $2
           AND status IN ('reserved', 'completed')
+          AND created_at >= $3 AND created_at < $4
         `,
-        [userId, kind, period]
+        [userId, kind, window.start, window.end]
     )
     return Number(row?.n || 0)
 }
@@ -128,7 +178,8 @@ async function buildQuota(userId, { skipCache = false } = {}) {
     if (!user) return null
 
     const settings = await getSettings()
-    const period = currentPeriod()
+    const window = quotaWindow(user.created_at)
+    const period = window.period
     const { reportCap, mockCap, pdfCap } = await capsForUser(user, settings)
 
     const [
@@ -140,17 +191,18 @@ async function buildQuota(userId, { skipCache = false } = {}) {
         reportGranted,
         mockGranted,
     ] = await Promise.all([
-        countActiveEvents(userId, "report", period),
-        countActiveEvents(userId, "mock", period),
-        countActiveEvents(userId, "pdf", period),
+        countActiveEvents(userId, "report", window),
+        countActiveEvents(userId, "mock", window),
+        countActiveEvents(userId, "pdf", window),
         countAll("interview_reports", userId),
         countAll("mock_interview_reports", userId),
-        grantsForPeriod(userId, "report", period),
-        grantsForPeriod(userId, "mock", period),
+        grantsForPeriod(userId, "report", window),
+        grantsForPeriod(userId, "mock", window),
     ])
 
     const quota = {
         period,
+        renewsAt: window.end.toISOString(),
         role: user.role === "admin" ? "admin" : "user",
         reports: toBucket({ used: reportsUsed, cap: reportCap, granted: reportGranted }),
         mocks: toBucket({ used: mocksUsed, cap: mockCap, granted: mockGranted }),
@@ -227,11 +279,12 @@ async function reserve({ userId, kind, idempotencyKey = null, jobId = null }) {
         }
 
         const settings = await getSettings()
-        const period = currentPeriod()
+        const window = quotaWindow(user.created_at)
+        const period = window.period
         const { reportCap, mockCap, pdfCap } = await capsForUser(user, settings)
         const cap = kind === "mock" ? mockCap : kind === "pdf" ? pdfCap : reportCap
-        const granted = await grantsForPeriod(userId, kind, period)
-        const used = await countActiveEvents(userId, kind, period, client)
+        const granted = await grantsForPeriod(userId, kind, window)
+        const used = await countActiveEvents(userId, kind, window, client)
 
         if (used >= cap + granted) {
             const quota = await buildQuota(userId, { skipCache: true })
@@ -311,7 +364,11 @@ async function refund(eventId, errorClass = "error") {
     return row
 }
 
-async function addGrant({ userId, kind, amount, period = currentPeriod() }) {
+async function addGrant({ userId, kind, amount, period }) {
+    if (!period) {
+        const user = await userRepository.findById(userId)
+        period = quotaWindow(user?.created_at).period
+    }
     const row = await queryOne(
         `
         INSERT INTO quota_grants (user_id, kind, amount, period)
@@ -324,9 +381,13 @@ async function addGrant({ userId, kind, amount, period = currentPeriod() }) {
     return row
 }
 
+function inWindow(value, window) {
+    const time = new Date(value).getTime()
+    return time >= window.start.getTime() && time < window.end.getTime()
+}
+
 async function listUsersWithQuota() {
     const settings = await getSettings()
-    const period = currentPeriod()
     const rows = await queryAll(
         `
         SELECT
@@ -337,52 +398,49 @@ async function listUsersWithQuota() {
             u.created_at,
             u.last_login_at,
             COALESCE(life.reports_lifetime, 0) AS reports_lifetime,
-            COALESCE(life.mocks_lifetime, 0) AS mocks_lifetime,
-            COALESCE(usage.reports_month, 0) AS reports_month,
-            COALESCE(usage.mocks_month, 0) AS mocks_month,
-            COALESCE(grants.report_grants, 0) AS report_grants,
-            COALESCE(grants.mock_grants, 0) AS mock_grants
+            COALESCE(life.mocks_lifetime, 0) AS mocks_lifetime
         FROM users u
         LEFT JOIN LATERAL (
             SELECT
                 (SELECT COUNT(*)::int FROM interview_reports ir WHERE ir.user_id = u.id) AS reports_lifetime,
                 (SELECT COUNT(*)::int FROM mock_interview_reports mr WHERE mr.user_id = u.id) AS mocks_lifetime
         ) life ON TRUE
-        LEFT JOIN LATERAL (
-            SELECT
-                COUNT(*) FILTER (WHERE e.kind = 'report')::int AS reports_month,
-                COUNT(*) FILTER (WHERE e.kind = 'mock')::int AS mocks_month
-            FROM quota_usage_events e
-            WHERE e.user_id = u.id
-              AND e.period = $1
-              AND e.status IN ('reserved', 'completed')
-        ) usage ON TRUE
-        LEFT JOIN LATERAL (
-            SELECT
-                COALESCE(SUM(amount) FILTER (WHERE g.kind = 'report'), 0)::int AS report_grants,
-                COALESCE(SUM(amount) FILTER (WHERE g.kind = 'mock'), 0)::int AS mock_grants
-            FROM quota_grants g
-            WHERE g.user_id = u.id AND g.period = $1
-        ) grants ON TRUE
         ORDER BY u.created_at DESC
-        `,
-        [period]
+        `
+    )
+    const events = await queryAll(
+        `
+        SELECT user_id, kind, created_at
+        FROM quota_usage_events
+        WHERE status IN ('reserved', 'completed')
+          AND created_at >= NOW() - INTERVAL '40 days'
+        `
+    )
+    const grants = await queryAll(
+        `
+        SELECT user_id, kind, amount, created_at
+        FROM quota_grants
+        WHERE created_at >= NOW() - INTERVAL '40 days'
+        `
     )
 
     return rows.map((row) => {
+        const window = quotaWindow(row.created_at)
         const isAdmin = row.role === "admin"
         const reportCap = isAdmin ? ADMIN_CAPS.report : settings.reportLimitMonthly
         const mockCap = isAdmin ? ADMIN_CAPS.mock : settings.mockLimitMonthly
-        const reports = toBucket({
-            used: row.reports_month,
-            cap: reportCap,
-            granted: row.report_grants,
-        })
-        const mocks = toBucket({
-            used: row.mocks_month,
-            cap: mockCap,
-            granted: row.mock_grants,
-        })
+        const used = { report: 0, mock: 0 }
+        const granted = { report: 0, mock: 0 }
+        for (const event of events) {
+            if (event.user_id !== row.id || !inWindow(event.created_at, window)) continue
+            if (event.kind === "report" || event.kind === "mock") used[event.kind] += 1
+        }
+        for (const grant of grants) {
+            if (grant.user_id !== row.id || !inWindow(grant.created_at, window)) continue
+            if (grant.kind === "report" || grant.kind === "mock") granted[grant.kind] += Number(grant.amount) || 0
+        }
+        const reports = toBucket({ used: used.report, cap: reportCap, granted: granted.report })
+        const mocks = toBucket({ used: used.mock, cap: mockCap, granted: granted.mock })
 
         return {
             id: row.id,
@@ -391,7 +449,8 @@ async function listUsersWithQuota() {
             role: isAdmin ? "admin" : "user",
             createdAt: row.created_at,
             lastLoginAt: row.last_login_at,
-            period,
+            period: window.period,
+            renewsAt: window.end.toISOString(),
             reports,
             mocks,
             lifetime: {
@@ -404,6 +463,7 @@ async function listUsersWithQuota() {
 
 async function getDashboardStats() {
     const period = currentPeriod()
+    const bounds = monthBounds()
     const settings = await getSettings()
     const users = await queryOne(
         `
@@ -432,9 +492,9 @@ async function getDashboardStats() {
             COUNT(*) FILTER (WHERE kind = 'report' AND status IN ('reserved', 'completed'))::int AS reports_month,
             COUNT(*) FILTER (WHERE kind = 'mock' AND status IN ('reserved', 'completed'))::int AS mocks_month
         FROM quota_usage_events
-        WHERE period = $1
+        WHERE created_at >= $1 AND created_at < $2
         `,
-        [period]
+        [bounds.start, bounds.end]
     )
     const lifetime = await queryOne(
         `
@@ -473,6 +533,7 @@ async function getDashboardStats() {
 
 module.exports = {
     currentPeriod,
+    quotaWindow,
     getSettings,
     updateSettings,
     getQuotaForUser,
